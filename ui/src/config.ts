@@ -27,10 +27,25 @@ const evmWalletChains: EVMWalletChains = {
 export const NETWORK_ID = "mainnet";
 export const EVMWalletChain = evmWalletChains[NETWORK_ID];
 
+const PUBLIC_OPEN_CROSSPOST_API = (
+  import.meta.env as { PUBLIC_OPEN_CROSSPOST_API?: string }
+).PUBLIC_OPEN_CROSSPOST_API?.trim();
+
 const RAW_OPEN_CROSSPOST_PROXY_API =
-  process.env.OPEN_CROSSPOST_PROXY_API ?? "/api/crosspost";
+  PUBLIC_OPEN_CROSSPOST_API || process.env.OPEN_CROSSPOST_PROXY_API || "";
 
 export const OPEN_CROSSPOST_PROXY_API = RAW_OPEN_CROSSPOST_PROXY_API;
+
+function resolveCrosspostDefaultOrigin(): string {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  const fromEnv = hostOriginFromPublicEnv();
+  if (fromEnv) return fromEnv;
+  const fromRuntime = hostOriginFromRuntime();
+  if (fromRuntime) return fromRuntime;
+  return "http://127.0.0.1:3000";
+}
 
 function hostOriginFromRuntime(): string | null {
   if (typeof window === "undefined") return null;
@@ -55,29 +70,18 @@ function hostOriginFromPublicEnv(): string | null {
 }
 
 export function getCrosspostApiBaseUrl(): string {
-  const raw = String(RAW_OPEN_CROSSPOST_PROXY_API ?? "").trim() || "/api/crosspost";
+  const raw = String(RAW_OPEN_CROSSPOST_PROXY_API ?? "").trim();
 
   if (/^https?:\/\//i.test(raw)) {
     return raw.replace(/\/+$/, "");
   }
 
-  const path = raw.startsWith("/") ? raw : `/${raw}`;
-
-  const fromRuntime = hostOriginFromRuntime();
-  if (fromRuntime) {
-    return `${fromRuntime}${path}`.replace(/\/+$/, "");
+  if (raw.startsWith("/")) {
+    const origin = resolveCrosspostDefaultOrigin();
+    return `${origin}${raw}`.replace(/\/+$/, "");
   }
 
-  const fromEnv = hostOriginFromPublicEnv();
-  if (fromEnv) {
-    return `${fromEnv}${path}`.replace(/\/+$/, "");
-  }
-
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return `${window.location.origin}${path}`.replace(/\/+$/, "");
-  }
-
-  return `http://127.0.0.1:3000${path}`.replace(/\/+$/, "");
+  return resolveCrosspostDefaultOrigin();
 }
 
 // Authentication configuration

@@ -113,6 +113,25 @@ export async function createRequestContext(
         linkedAccounts,
         hasNearAccount: true,
       };
+    } else {
+      const siwnAccounts = await db.query.account.findMany({
+        where: and(eq(schema.account.userId, user.id), eq(schema.account.providerId, "siwn")),
+      });
+
+      if (siwnAccounts.length > 0) {
+        const linkedAccounts: NearIdentity[] = siwnAccounts.map((row, index) => ({
+          accountId: row.accountId,
+          network: "mainnet",
+          publicKey: "",
+          isPrimary: index === 0,
+        }));
+
+        nearCapabilities = {
+          primaryAccountId: siwnAccounts[0].accountId,
+          linkedAccounts,
+          hasNearAccount: true,
+        };
+      }
     }
   }
 

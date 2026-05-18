@@ -157,9 +157,9 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@module-federation/enhanced": "^0.24.1",
-    "@module-federation/node": "^2.7.32",
-    "@module-federation/runtime-core": "^0.24.1",
+    "@module-federation/enhanced": "^2.4.0",
+    "@module-federation/node": "^2.7.42",
+    "@module-federation/runtime-core": "^2.4.0",
     "@orpc/client": "^1.13.4",
     "@orpc/contract": "^1.13.4",
     "@orpc/experimental-publisher": "^1.13.4",

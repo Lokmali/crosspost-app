@@ -1,4 +1,3 @@
-// PlatformName import removed "@crosspost/plugin/types";
 import { SUPPORTED_PLATFORMS } from "@crosspost/plugin/types";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { RefreshCw } from "lucide-react";
@@ -34,7 +33,7 @@ function ManageAccountsPage() {
             <BackButton />
           </div>
           <h1 className="text-2xl font-bold">Manage Social Accounts</h1>
-          <p className="text-gray-500">
+          <p className="text-muted-foreground">
             Connect and manage your social media accounts for crossposting
           </p>
         </div>
@@ -55,11 +54,11 @@ function ManageAccountsPage() {
                 <PlatformAccountItem account={profile} showActions={false} />
               </div>
             ) : (
-              <div className="rounded-md border-2 border-dashed border-gray-200 p-4 sm:p-8 text-center">
-                <h3 className="mt-2 text-lg font-medium text-gray-900">
+              <div className="rounded-md border-2 border-dashed border-border p-4 sm:p-8 text-center">
+                <h3 className="mt-2 text-lg font-medium text-foreground">
                   No NEAR account connected
                 </h3>
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-muted-foreground">
                   Please sign in with your NEAR wallet to use NEAR Social
                 </p>
               </div>

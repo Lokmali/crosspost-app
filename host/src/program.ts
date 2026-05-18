@@ -208,13 +208,23 @@ export async function proxyRequest(
   req: Request,
   targetBase: string,
   rewriteCookies = false,
+  normalizeCrosspostApiErrors = false,
 ): Promise<Response> {
   const url = new URL(req.url);
   const targetUrl = `${targetBase}${url.pathname}${url.search}`;
+  const method = req.method;
 
   const headers = new Headers(req.headers);
   headers.delete("host");
   headers.set("accept-encoding", "identity");
+
+  let body: BodyInit | undefined;
+  if (method !== "GET" && method !== "HEAD") {
+    const buf = await req.arrayBuffer();
+    body = buf.byteLength > 0 ? buf : undefined;
+    headers.delete("content-length");
+    headers.delete("transfer-encoding");
+  }
 
   if (rewriteCookies) {
     const cookieHeader = headers.get("cookie");
@@ -225,33 +235,156 @@ export async function proxyRequest(
   }
 
   const proxyReq = new Request(targetUrl, {
-    method: req.method,
+    method,
     headers,
-    body: req.body,
-    duplex: "half",
-  } as RequestInit);
+    body,
+  });
 
-  const response = await fetch(proxyReq);
-
-  const responseHeaders = new Headers(response.headers);
-  responseHeaders.delete("content-encoding");
-  responseHeaders.delete("content-length");
-
-  if (rewriteCookies) {
-    responseHeaders.delete("set-cookie");
-    const setCookies =
-      typeof response.headers.getSetCookie === "function"
-        ? response.headers.getSetCookie()
-        : (response.headers.get("set-cookie")?.split(/,(?=\s*(?:__Secure-|__Host-)?\w+=)/) ?? []);
-    for (const cookie of setCookies) {
-      const rewritten = cookie
-        .replace(/^(__Secure-|__Host-)/i, "")
-        .replace(/;\s*Domain=[^;]*/gi, "")
-        .replace(/;\s*Secure/gi, "");
-      responseHeaders.append("set-cookie", rewritten);
+  let response: Response;
+  try {
+    response = await fetch(proxyReq);
+  } catch (err) {
+    if (!normalizeCrosspostApiErrors) {
+      throw err;
     }
+    const msg = err instanceof Error ? err.message : String(err);
+    return Response.json(
+      {
+        success: false,
+        meta: {},
+        errors: [
+          {
+            message: `Could not reach Open Crosspost API (${targetBase}). ${msg}`,
+            code: "NETWORK_ERROR",
+            recoverable: false,
+          },
+        ],
+      },
+      { status: 503 },
+    );
   }
 
+  const buildResponseHeaders = () => {
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.delete("content-encoding");
+    responseHeaders.delete("content-length");
+    if (rewriteCookies) {
+      responseHeaders.delete("set-cookie");
+      const setCookies =
+        typeof response.headers.getSetCookie === "function"
+          ? response.headers.getSetCookie()
+          : (response.headers.get("set-cookie")?.split(/,(?=\s*(?:__Secure-|__Host-)?\w+=)/) ?? []);
+      for (const cookie of setCookies) {
+        const rewritten = cookie
+          .replace(/^(__Secure-|__Host-)/i, "")
+          .replace(/;\s*Domain=[^;]*/gi, "")
+          .replace(/;\s*Secure/gi, "");
+        responseHeaders.append("set-cookie", rewritten);
+      }
+    }
+    return responseHeaders;
+  };
+
+  if (normalizeCrosspostApiErrors && !response.ok) {
+    const status = response.status;
+    const buf = await response.arrayBuffer();
+    const ct = (response.headers.get("content-type") ?? "").toLowerCase();
+    const responseHeaders = buildResponseHeaders();
+
+    const gatewayMessage = (() => {
+      if (status === 504) {
+        return "Gateway timeout (504): Open Crosspost did not respond in time. It may be overloaded or unreachable—try again shortly.";
+      }
+      if (status === 502) {
+        return "Bad gateway (502): No valid response from Open Crosspost.";
+      }
+      if (status === 503) {
+        return "Service unavailable (503): Open Crosspost may be down for maintenance.";
+      }
+      return `Open Crosspost returned HTTP ${status}`;
+    })();
+
+    const wrap = (message: string, code: string) =>
+      JSON.stringify({
+        success: false,
+        meta: { upstreamStatus: status },
+        errors: [{ message, code, recoverable: status >= 500 }],
+      });
+
+    if (buf.byteLength === 0) {
+      responseHeaders.set("content-type", "application/json; charset=utf-8");
+      return new Response(wrap(`${gatewayMessage} (empty body)`, "PLATFORM_UNAVAILABLE"), {
+        status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
+    }
+
+    const text = new TextDecoder().decode(buf);
+    const tryJson =
+      ct.includes("application/json") ||
+      ct.includes("text/json") ||
+      /^\s*[{\[]/.test(text);
+
+    if (tryJson) {
+      try {
+        const data = JSON.parse(text) as unknown;
+        if (
+          data &&
+          typeof data === "object" &&
+          !Array.isArray(data) &&
+          data !== null &&
+          "success" in data
+        ) {
+          responseHeaders.set("content-type", "application/json; charset=utf-8");
+          return new Response(text, {
+            status,
+            statusText: response.statusText,
+            headers: responseHeaders,
+          });
+        }
+        if (data && typeof data === "object" && !Array.isArray(data) && data !== null) {
+          const rec = data as Record<string, unknown>;
+          const detailVal = rec.detail;
+          const detail =
+            typeof detailVal === "string"
+              ? detailVal
+              : detailVal && typeof detailVal === "object" && "message" in detailVal
+                ? String((detailVal as { message?: unknown }).message ?? "")
+                : "";
+          const message =
+            (typeof rec.error === "string" && rec.error) ||
+            (typeof rec.message === "string" && rec.message) ||
+            (detail && String(detail)) ||
+            gatewayMessage;
+          responseHeaders.set("content-type", "application/json; charset=utf-8");
+          return new Response(wrap(message, "INVALID_RESPONSE"), {
+            status,
+            statusText: response.statusText,
+            headers: responseHeaders,
+          });
+        }
+      } catch {
+        responseHeaders.set("content-type", "application/json; charset=utf-8");
+        return new Response(wrap(`${gatewayMessage} (invalid JSON body)`, "INVALID_RESPONSE"), {
+          status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
+      }
+    }
+
+    responseHeaders.set("content-type", "application/json; charset=utf-8");
+    const plain = text.replace(/\s+/g, " ").trim().slice(0, 280);
+    const suffix = plain ? ` Preview: ${plain}` : "";
+    return new Response(wrap(`${gatewayMessage}.${suffix}`, "PLATFORM_UNAVAILABLE"), {
+      status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    });
+  }
+
+  const responseHeaders = buildResponseHeaders();
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -294,11 +427,42 @@ export function setupApiRoutes(
     };
   };
 
+  const handleMeNear = async (c: Context) => {
+    const ctx = await createRequestContext(c.req.raw, auth, db);
+    if (!ctx.isAuthenticated) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    return c.json({
+      primaryAccountId: ctx.near.primaryAccountId,
+      linkedAccounts: ctx.near.linkedAccounts,
+      hasNearAccount: ctx.near.hasNearAccount,
+    });
+  };
+
+  const crosspostUpstream =
+    process.env.OPEN_CROSSPOST_UPSTREAM_URL?.trim().replace(/\/$/, "") ||
+    "https://api.opencrosspost.com";
+
+  const mountOpenCrosspostProxy = () => {
+    const handler = (c: Context) => proxyRequest(c.req.raw, crosspostUpstream, false, true);
+    app.all("/auth", handler);
+    app.all("/auth/*", handler);
+    app.all("/api/post", handler);
+    app.all("/api/post/*", handler);
+    app.all("/api/activity", handler);
+    app.all("/api/activity/*", handler);
+    app.all("/api/rate-limit", handler);
+    app.all("/api/rate-limit/*", handler);
+  };
+
   const isProxyMode = !!apiConfig.proxy;
 
   if (isProxyMode) {
     const proxyTarget = apiConfig.proxy!;
     logger.info(`[API] Proxy mode enabled → ${proxyTarget}`);
+
+    app.get("/api/me/near", handleMeNear);
+    mountOpenCrosspostProxy();
 
     app.all("/api/*", async (c: Context) => {
       if (c.req.path === "/api/_health") {
@@ -314,6 +478,10 @@ export function setupApiRoutes(
   app.get("/api/_health", (c: Context) => {
     return c.json(getHealthStatus());
   });
+
+  app.get("/api/me/near", handleMeNear);
+
+  mountOpenCrosspostProxy();
 
   const handleOrpc = async (
     c: Context,
@@ -430,7 +598,17 @@ export const createStartServer = (onReady?: () => void) =>
 
     app.use("*", secureHeaders());
 
-    app.get("/health", (c: Context) => c.text("OK"));
+    const openCrosspostUpstreamForHealth =
+      process.env.OPEN_CROSSPOST_UPSTREAM_URL?.trim().replace(/\/$/, "") ||
+      "https://api.opencrosspost.com";
+
+    app.get("/health", async (c: Context) => {
+      const accept = c.req.header("accept") ?? "";
+      if (accept.includes("application/json")) {
+        return proxyRequest(c.req.raw, openCrosspostUpstreamForHealth, false);
+      }
+      return c.text("OK");
+    });
 
     let ssrRouterModule: RouterModule | null = null;
 

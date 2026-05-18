@@ -71,7 +71,11 @@ const processConfigBases: Record<string, ProcessConfigBase> = {
     args: ["run", "dev"],
     cwd: "ui",
     // Wait for the client build (mf) specifically, not just SSR.
-    readyPatterns: [/\bready\s+built in\b/i, /\bLocal:\b/i, /\bcompiled\b.*successfully/i],
+    readyPatterns: [
+      /\bready\s+built in\b/i,
+      /\bLocal:\s/i,
+      /\bcompiled\b.*successfully/i,
+    ],
     errorPatterns: [/error/i, /failed to compile/i],
   },
   "ui-ssr": {

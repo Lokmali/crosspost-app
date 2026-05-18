@@ -2,6 +2,11 @@
 // This file provides backward compatibility for code that uses the old near.ts API
 
 import { Buffer } from "buffer";
+import { generateNonce, parseAuthToken, sign as signNep413 } from "near-sign-verify";
+import { getHostUrl } from "@/app";
+import { authClient } from "@/lib/auth-client";
+import { getNearWalletDisplayFromSession } from "@/lib/near-session-display";
+import { ensureNearWalletConnectedForSigning } from "@/lib/session";
 
 // Wallet instance type
 interface WalletInstance {
@@ -31,10 +36,46 @@ export function setWalletInstance(wallet: WalletInstance | null) {
 
 // Helper to get current account
 export async function getAccountId(): Promise<string | null> {
-  if (!walletInstance) {
-    throw new Error("Wallet not initialized. Make sure WalletProvider is set up.");
+  const fromWallet = walletInstance?.accountId?.trim() || null;
+  if (fromWallet) {
+    return fromWallet;
   }
-  return walletInstance.accountId;
+
+  const accountIdFromAuth = authClient.near.getAccountId?.() ?? null;
+  if (accountIdFromAuth) {
+    return accountIdFromAuth;
+  }
+
+  return null;
+}
+
+async function fetchPrimaryNearAccountFromHost(): Promise<string | null> {
+  try {
+    const res = await fetch(`${getHostUrl()}/api/me/near`, { credentials: "include" });
+    if (!res.ok) {
+      return null;
+    }
+    const data = (await res.json()) as { primaryAccountId?: string | null };
+    const id = data.primaryAccountId?.trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveLinkedNearAccountId(): Promise<string | null> {
+  const fromWallet = await getAccountId();
+  if (fromWallet) {
+    return fromWallet;
+  }
+
+  const fromHost = await fetchPrimaryNearAccountFromHost();
+  if (fromHost) {
+    return fromHost;
+  }
+
+  const { data: session } = await authClient.getSession();
+  return getNearWalletDisplayFromSession(session);
 }
 
 // Helper to check if signed in
@@ -61,10 +102,17 @@ export async function signOut(): Promise<void> {
 
 // Helper to get wallet instance
 export async function getWallet() {
-  if (!walletInstance || !walletInstance.connector) {
-    throw new Error("Wallet not initialized. Make sure WalletProvider is set up.");
+  if (walletInstance?.connector) {
+    return await walletInstance.connector.wallet();
   }
-  return await walletInstance.connector.wallet();
+
+  const nearClient = authClient.near.getNearClient?.();
+  const wallet = (nearClient as { wallet?: unknown } | null | undefined)?.wallet;
+  if (wallet) {
+    return wallet;
+  }
+
+  throw new Error("Wallet not initialized. Make sure WalletProvider is set up.");
 }
 
 // Helper to get the wallet instance (for near-social-js integration)
@@ -76,7 +124,16 @@ export function getWalletInstance(): WalletInstance | null {
 export async function signMessage(
   message: string,
   recipient: string,
-): Promise<{ signature: string; publicKey: string }> {
+): Promise<{
+  account_id: string;
+  accountId: string;
+  public_key: string;
+  publicKey: string;
+  signature: string;
+  message: string;
+  nonce: Uint8Array;
+  recipient: string;
+}> {
   console.log("signMessage called:", {
     hasWalletInstance: !!walletInstance,
     hasSignMessage: !!walletInstance?.signMessage,
@@ -85,25 +142,78 @@ export async function signMessage(
     recipient,
   });
 
-  if (!walletInstance) {
-    throw new Error(
-      "Wallet not initialized. Make sure WalletProvider is set up and wallet is connected.",
-    );
-  }
-
-  if (!walletInstance.signMessage) {
-    throw new Error(
-      "Wallet signMessage function not available. Please ensure your wallet supports message signing.",
-    );
-  }
-
-  if (!walletInstance.accountId) {
-    throw new Error("Wallet account not available. Please connect your wallet first.");
-  }
-
   try {
-    console.log("Calling walletInstance.signMessage...");
-    const result = await walletInstance.signMessage(message, recipient);
+    const nonce = generateNonce();
+    let result:
+      | {
+          signature: string | Uint8Array;
+          publicKey: string;
+          accountId?: string;
+        }
+      | undefined;
+
+    const nearAccountId = await resolveLinkedNearAccountId();
+    if (!nearAccountId) {
+      throw new Error("Wallet account not available. Please connect your wallet first.");
+    }
+
+    await ensureNearWalletConnectedForSigning();
+
+    try {
+      const nearClient = authClient.near.getNearClient?.() as
+        | { signMessage?: (p: { message: string; recipient: string; nonce: Uint8Array }) => Promise<unknown> }
+        | null
+        | undefined;
+      if (nearClient?.signMessage) {
+        console.log("Calling near-sign-verify sign(...) with NEAR client signer...");
+        const authTokenString = await signNep413(message, {
+          signer: nearClient as object,
+          recipient,
+          nonce,
+        });
+        const parsed = parseAuthToken(authTokenString);
+
+        if (parsed.signature && parsed.publicKey) {
+          result = {
+            signature: parsed.signature,
+            publicKey: parsed.publicKey,
+            accountId: parsed.accountId || nearAccountId,
+          };
+        }
+      }
+    } catch (signerError) {
+      console.warn("near-sign-verify signing path failed, trying wallet.signMessage fallback:", signerError);
+    }
+
+    if (!result) {
+      try {
+        const wallet = await getWallet();
+        if ((wallet as { signMessage?: unknown })?.signMessage) {
+          console.log("Calling wallet.signMessage with NEP-413 payload...");
+          result = await (wallet as {
+            signMessage: (params: {
+              message: string;
+              recipient: string;
+              nonce: Uint8Array;
+            }) => Promise<{ signature: string | Uint8Array; publicKey: string; accountId?: string }>;
+          }).signMessage({
+            message,
+            recipient,
+            nonce,
+          });
+        }
+      } catch (walletSignError) {
+        console.warn(
+          "wallet.signMessage(payload) failed, falling back to legacy signMessage:",
+          walletSignError,
+        );
+      }
+    }
+
+    if (!result && walletInstance?.signMessage) {
+      console.log("Calling walletInstance.signMessage fallback...");
+      result = await walletInstance.signMessage(message, recipient);
+    }
 
     console.log("signMessage result received:", {
       hasResult: !!result,
@@ -132,9 +242,28 @@ export async function signMessage(
       throw new Error(`Unexpected signature type: ${typeof result.signature}`);
     }
 
+    let accountId =
+      result.accountId ||
+      walletInstance?.accountId?.trim() ||
+      authClient.near.getAccountId?.() ||
+      "";
+    if (!accountId) {
+      accountId = (await resolveLinkedNearAccountId()) || "";
+    }
+    if (!accountId) {
+      throw new Error("Could not resolve account ID from signed message.");
+    }
+    const publicKey = result.publicKey;
+
     return {
+      account_id: accountId,
+      accountId,
+      public_key: publicKey,
+      publicKey,
       signature: signatureString,
-      publicKey: result.publicKey,
+      message,
+      nonce,
+      recipient,
     };
   } catch (error) {
     console.error("Error in signMessage:", error);

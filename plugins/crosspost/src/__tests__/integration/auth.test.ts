@@ -91,6 +91,23 @@ describe('Auth Integration Tests', () => {
     expect(result.url).toContain('twitter.com/oauth/authorize');
   });
 
+  it('should login to farcaster platform', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          url: 'https://farcaster.xyz/oauth/authorize?client_id=test',
+        }),
+    });
+
+    const { client } = await runtime.usePlugin('@crosspost/plugin', config);
+    const result = await client.auth.loginToPlatform({
+      platform: 'farcaster',
+    });
+
+    expect(result.url).toContain('farcaster.xyz/oauth/authorize');
+  });
+
   it('should get connected accounts', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,

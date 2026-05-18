@@ -224,7 +224,7 @@ export const runDevSession = (
     const awaitReady = (pkg: string, handle: ProcessHandle) =>
       Effect.race(
         handle.waitForReady,
-        Effect.sleep("30 seconds").pipe(
+        Effect.sleep("120 seconds").pipe(
           Effect.andThen(
             Effect.sync(() => {
               callbacks.onLog(pkg, "Timeout waiting for ready, continuing...", true);

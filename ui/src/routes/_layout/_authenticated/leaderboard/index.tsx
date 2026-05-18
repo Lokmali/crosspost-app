@@ -1,4 +1,9 @@
-import { ActivityLeaderboardQuerySchema, type Platform, TimePeriod } from "@crosspost/plugin/types";
+import {
+  ActivityLeaderboardQuerySchema,
+  Platform,
+  SUPPORTED_PLATFORMS,
+  TimePeriod,
+} from "@crosspost/plugin/types";
 import { getErrorMessage } from "@crosspost/sdk";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -12,7 +17,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BackButton } from "@/components/back-button";
 import { InlineBadges } from "@/components/badges/inline-badges";
 import { Button } from "@/components/ui/button";
@@ -62,12 +67,12 @@ export const Route = createFileRoute("/_layout/_authenticated/leaderboard/")({
 
 const fetchAllLeaderboardData = async ({
   timeframe,
-  platform,
+  platforms,
   startDate,
   endDate,
 }: {
   timeframe: TimePeriod;
-  platform?: string;
+  platforms?: string[];
   startDate?: string;
   endDate?: string;
 }) => {
@@ -83,7 +88,7 @@ const fetchAllLeaderboardData = async ({
       timeframe,
       startDate,
       endDate,
-      platforms: platform ? [platform as Platform] : undefined,
+      platforms: platforms?.length ? platforms : undefined,
     });
     const entries = normalized.entries as unknown as LeaderboardEntry[];
     allEntries.push(...entries);
@@ -114,6 +119,10 @@ function LeaderboardPage() {
     pageIndex: 0,
     pageSize: 10,
   });
+
+  useEffect(() => {
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+  }, [timeframe, startDate, endDate, platforms?.join(",")]);
 
   const {
     data: queryResult,
@@ -190,7 +199,7 @@ function LeaderboardPage() {
     try {
       const allData = await fetchAllLeaderboardData({
         timeframe: timeframe ?? TimePeriod.ALL,
-        platform: platforms?.[0], // Pass the first platform if available
+        platforms,
         startDate,
         endDate,
       });
@@ -225,7 +234,7 @@ function LeaderboardPage() {
             <Link
               to={`/profile/$accountId`}
               params={{ accountId }}
-              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline transition-colors block truncate"
+              className="text-primary hover:underline transition-colors block truncate"
             >
               {accountId}
             </Link>
@@ -314,13 +323,14 @@ function LeaderboardPage() {
     // Alternatively, if totalEntries is 0 initially: pageCount: Math.max(1, Math.ceil(totalEntries / pagination.pageSize))
   });
 
+  const platformFilterValue =
+    platforms?.length === 1 && platforms[0] ? platforms[0] : "all";
+
   return (
-    <div className="container mx-auto">
-      <div className="flex items-center justify-between mb-4">
+    <div className="container mx-auto px-4 py-6">
+      <div className="flex flex-col gap-4 mb-6">
         <BackButton />
-        {/* Filters */}
-        <div className="flex flex-wrap gap-4 mb-6">
-          {/* Custom Date Range Pickers */}
+        <div className="flex flex-wrap gap-4 items-end">
           {timeframe === TimePeriod.CUSTOM && (
             <>
               <div>
@@ -330,8 +340,8 @@ function LeaderboardPage() {
                   onDateChange={(date) => {
                     const dateString = date ? date.toISOString() : undefined;
                     navigate({
-                      search: (prev: any) => ({
-                        ...prev,
+                      search: (prev: unknown) => ({
+                        ...(prev as Record<string, unknown>),
                         startDate: dateString,
                       }),
                       replace: true,
@@ -347,8 +357,8 @@ function LeaderboardPage() {
                   onDateChange={(date) => {
                     const dateString = date ? date.toISOString() : undefined;
                     navigate({
-                      search: (prev: any) => ({
-                        ...prev,
+                      search: (prev: unknown) => ({
+                        ...(prev as Record<string, unknown>),
                         endDate: dateString,
                       }),
                       replace: true,
@@ -365,12 +375,11 @@ function LeaderboardPage() {
             <Select
               value={timeframe ?? TimePeriod.ALL}
               onValueChange={(v) => {
-                const newSearch: any = {
+                const newSearch: Record<string, unknown> = {
                   ...search,
                   timeframe: (v as TimePeriod) || undefined,
                 };
 
-                // Clear custom date range when switching away from custom
                 if (v !== TimePeriod.CUSTOM) {
                   delete newSearch.startDate;
                   delete newSearch.endDate;
@@ -382,7 +391,7 @@ function LeaderboardPage() {
                 });
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="Select timeframe" />
               </SelectTrigger>
               <SelectContent>
@@ -396,29 +405,39 @@ function LeaderboardPage() {
             </Select>
           </div>
 
-          {/* <div>
-          <label className="block text-sm font-medium mb-1">Platform</label>
-          <select
-            value={platforms}
-            // Update platform state correctly using Platform enum values
-            onChange={(e) => setPlatform(e.target.value || undefined)} // Keep as string for value, handle conversion in fetch
-            className="border rounded px-3 py-2 w-full"
-          >
-            <option value="">All Platforms</option>
-            {Object.entries(Platform).map(([key, value]) => (
-              <option key={key} value={value}>
-                {" "}
-                {key}
-              </option>
-            ))}
-          </select>
-        </div> */}
+          <div>
+            <Label className="block text-sm font-medium mb-1">Platform</Label>
+            <Select
+              value={platformFilterValue}
+              onValueChange={(v) => {
+                navigate({
+                  search: {
+                    ...search,
+                    platforms: v === "all" ? undefined : [v],
+                  },
+                  replace: true,
+                });
+              }}
+            >
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="All platforms" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All platforms</SelectItem>
+                {SUPPORTED_PLATFORMS.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p === Platform.TWITTER ? "Twitter" : "Farcaster"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-600 text-red-700 dark:text-red-300 px-4 py-3 rounded mb-4">
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-destructive mb-4">
           {getErrorMessage(error, "Failed to fetch leaderboard data")}
         </div>
       )}
@@ -427,27 +446,27 @@ function LeaderboardPage() {
       {isLoading ? (
         <div className="flex justify-center items-center h-64">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 dark:border-blue-400 mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-400">Loading leaderboard data...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto mb-4" />
+            <p className="text-muted-foreground">Loading leaderboard data...</p>
           </div>
         </div>
       ) : (
         <>
           {/* Table */}
-          <div className="overflow-x-auto base-component rounded-lg relative">
+          <div className="overflow-x-auto base-component rounded-lg relative border border-border">
             {isFetching && !isLoading && (
               <div className="absolute top-2 right-2 z-10">
-                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-500 dark:border-blue-400"></div>
+                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-primary" />
               </div>
             )}
             <Table className="min-w-full">
-              <TableHeader className="bg-gray-50 dark:bg-gray-800">
+              <TableHeader className="bg-muted/50">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <TableRow key={headerGroup.id}>
                     {headerGroup.headers.map((header) => (
                       <TableHead
                         key={header.id}
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer"
+                        className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer"
                         onClick={header.column.getToggleSortingHandler()}
                       >
                         <div className="flex items-center gap-1">
@@ -463,10 +482,10 @@ function LeaderboardPage() {
                   </TableRow>
                 ))}
               </TableHeader>
-              <TableBody className="bg-white dark:bg-black divide-y divide-gray-200 dark:divide-gray-700">
+              <TableBody className="bg-background divide-y divide-border">
                 {table.getRowModel()?.rows?.length > 0 ? (
                   table.getRowModel()?.rows?.map((row) => (
-                    <TableRow key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <TableRow key={row.id} className="hover:bg-muted/50">
                       {row.getVisibleCells()?.map((cell) => (
                         <TableCell key={cell.id} className="px-6 py-4 whitespace-nowrap text-sm ">
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -478,7 +497,7 @@ function LeaderboardPage() {
                   <TableRow>
                     <TableCell
                       colSpan={columns.length}
-                      className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400"
+                      className="px-6 py-4 text-center text-sm text-muted-foreground"
                     >
                       No data available
                     </TableCell>

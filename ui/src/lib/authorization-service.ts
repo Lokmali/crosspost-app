@@ -1,7 +1,7 @@
 import { CrosspostClient } from "@crosspost/sdk";
 import { getCrosspostApiBaseUrl } from "@/config";
 import { toast } from '@/hooks/use-toast';
-import { getAccountId, signMessage } from '@/lib/near';
+import { resolveLinkedNearAccountId, signMessage } from '@/lib/near';
 
 let clientInstance: CrosspostClient | null = null;
 let clientBaseUrl: string | null = null;
@@ -15,6 +15,7 @@ export function getClient(): CrosspostClient {
   if (!clientInstance || clientBaseUrl !== baseUrl) {
     clientInstance = new CrosspostClient({
       baseUrl,
+      timeout: 120_000,
     });
     clientBaseUrl = baseUrl;
   }
@@ -36,8 +37,8 @@ export async function authorize(): Promise<boolean> {
 
   try {
     const client = getClient();
-    const accountId = await getAccountId();
-    
+    const accountId = await resolveLinkedNearAccountId();
+
     if (!accountId) {
       throw new Error("Wallet not connected");
     }

@@ -94,6 +94,27 @@ describe('CrosspostService', () => {
       );
     });
 
+    it('should login to farcaster platform', async () => {
+      const mockResponse = {
+        url: 'https://farcaster.xyz/oauth/authorize?client_id=test',
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await Effect.runPromise(service.loginToPlatform('farcaster'));
+
+      expect(result).toEqual(mockResponse);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/auth/farcaster/login'),
+        expect.objectContaining({
+          method: 'POST',
+        }),
+      );
+    });
+
     it('should refresh token', async () => {
       const mockResponse = {
         platform: 'twitter',
@@ -114,6 +135,32 @@ describe('CrosspostService', () => {
       expect(result).toEqual(mockResponse);
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('/auth/twitter/refresh'),
+        expect.objectContaining({
+          method: 'POST',
+        }),
+      );
+    });
+
+    it('should refresh farcaster token', async () => {
+      const mockResponse = {
+        platform: 'farcaster',
+        userId: 'fc-user',
+        status: {
+          code: 'success',
+          message: 'Token refreshed',
+        },
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await Effect.runPromise(service.refreshToken('farcaster', 'fc-user'));
+
+      expect(result).toEqual(mockResponse);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/auth/farcaster/refresh'),
         expect.objectContaining({
           method: 'POST',
         }),

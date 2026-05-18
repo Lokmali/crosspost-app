@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "BOS_CONFIG_PATH=../bos.config.json tsx server.ts",
+    "dev": "bun ./server.ts",
     "build": "rsbuild build",
     "deploy": "DEPLOY=true rsbuild build",
-    "bootstrap": "tsx bootstrap.ts",
-    "preview": "NODE_ENV=production BOS_CONFIG_PATH=../bos.config.json tsx server.ts",
+    "bootstrap": "node --import tsx ./bootstrap.ts",
+    "preview": "NODE_ENV=production node --import tsx ./server.ts",
     "test": "NODE_ENV=production BOS_CONFIG_PATH=../bos.config.json ./node_modules/.bin/vitest run",
     "test:e2e": "BOS_CONFIG_PATH=../bos.config.json playwright test -c ./playwright.config.mjs",
     "test:integration:remote": "BOS_CONFIG_PATH=../bos.config.json vitest run -c ./vitest.remote.config.ts",
@@ -50,8 +50,8 @@
     "@playwright/test": "^1.58.1",
     "everything-dev": "workspace:*",
     "@module-federation/rsbuild-plugin": "catalog:",
-    "@rsbuild/core": "^1.7.2",
-    "@rsbuild/plugin-react": "^1.4.3",
+    "@rsbuild/core": "^2.0.5",
+    "@rsbuild/plugin-react": "^2.0.0",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -61,6 +61,6 @@
     "vite-tsconfig-paths": "^6.0.4",
     "vitest": "catalog:",
     "web-vitals": "^5.1.0",
-    "zephyr-rsbuild-plugin": "0.1.4"
+    "zephyr-rsbuild-plugin": "^1.1.0"
   }
 }
