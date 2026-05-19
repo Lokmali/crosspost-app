@@ -7,7 +7,9 @@ import { useToast } from "@/hooks/use-toast";
 import { authClient } from "@/lib/auth-client";
 import { createAuthenticatedMutation } from "@/lib/authentication-service";
 import { getClient } from "@/lib/authorization-service";
-import { signMessage } from "@/lib/near";
+import { resolveLinkedNearAccountId, signMessage } from "@/lib/near";
+import { getNearWalletDisplayFromSession } from "@/lib/near-session-display";
+import { linkNearWallet } from "@/lib/session";
 import { getImageUrl, getProfile } from "@/lib/utils/near-social-node";
 
 interface PlatformAccountsState {
@@ -64,21 +66,29 @@ export const usePlatformAccountsStore = create<PlatformAccountsState>()(
 
 export function useConnectedAccounts() {
   const { data: session } = authClient.useSession();
-  const currentAccountId = session?.user?.id ?? null;
+  const sessionNearId = getNearWalletDisplayFromSession(session);
+  const currentAccountId = sessionNearId ?? session?.user?.id ?? null;
   const isSignedIn = !!session?.user;
   const { toast } = useToast();
 
   return useQuery({
-    queryKey: ["connectedAccounts"],
+    queryKey: ["connectedAccounts", currentAccountId],
     queryFn: async () => {
-      if (!currentAccountId) {
-        throw new Error("Wallet not connected or account ID unavailable.");
+      const accountId = (await resolveLinkedNearAccountId()) ?? sessionNearId;
+
+      if (!accountId) {
+        throw new Error("No NEAR account connected. Please connect your wallet and try again.");
       }
       try {
         const client = getClient();
-        (client as { setAccountHeader?: (accountId: string) => void }).setAccountHeader?.(
-          currentAccountId,
-        );
+        const accountAwareClient = client as {
+          setAccountHeader?: (id: string) => void;
+          setAccountId?: (id: string) => void;
+          setNearAccount?: (id: string) => void;
+        };
+        accountAwareClient.setAccountHeader?.(accountId);
+        accountAwareClient.setAccountId?.(accountId);
+        accountAwareClient.setNearAccount?.(accountId);
 
         const response = await client.auth.getConnectedAccounts();
 
@@ -101,7 +111,7 @@ export function useConnectedAccounts() {
         throw error;
       }
     },
-    enabled: !!isSignedIn,
+    enabled: isSignedIn || !!currentAccountId,
     retry: 1,
     retryDelay: 1000,
     gcTime: 0,
@@ -113,23 +123,128 @@ interface ConnectAccountVariables {
   platform: Platform;
 }
 
+function openAuthPopupWindow() {
+  if (typeof window === "undefined") {
+    throw new Error("OAuth popup can only be opened in a browser.");
+  }
+
+  const width = 600;
+  const height = 700;
+  const left = Math.max(0, (window.innerWidth - width) / 2);
+  const top = Math.max(0, (window.innerHeight - height) / 2);
+
+  const popup = window.open(
+    "about:blank",
+    "authPopup",
+    `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`,
+  );
+
+  if (!popup) {
+    throw new Error("Popup blocked. Please allow popups for this site.");
+  }
+
+  return popup;
+}
+
+function waitForAuthPopupResult(popup: Window): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let messageReceived = false;
+
+    const cleanup = () => {
+      window.removeEventListener("message", handleMessage);
+      clearInterval(checkClosedInterval);
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.source !== popup) return;
+
+      const message = event.data as
+        | {
+            type?: string;
+            data?: {
+              success?: boolean;
+              error?: string;
+              userId?: string;
+            };
+          }
+        | undefined;
+
+      if (message?.type !== "AUTH_CALLBACK") return;
+
+      messageReceived = true;
+      cleanup();
+
+      if (message.data?.success && message.data?.userId) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(message.data?.error || "Authentication failed."));
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    const checkClosedInterval = window.setInterval(() => {
+      if (popup.closed) {
+        cleanup();
+        if (!messageReceived) {
+          reject(new Error("Authentication cancelled by user."));
+        }
+      }
+    }, 500);
+  });
+}
+
+function renderPopupError(popup: Window, message: string) {
+  try {
+    if (popup.closed) return;
+    popup.document.open();
+    popup.document.write(`
+      <html>
+        <head><title>Authentication Error</title></head>
+        <body style="font-family: sans-serif; padding: 16px;">
+          <h3>Authentication failed</h3>
+          <p>${message.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+          <p>You can close this window and try again.</p>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+  } catch {
+    // Ignore popup rendering errors (cross-origin / closed window)
+  }
+}
+
 // Connect a platform account
 export const useConnectAccount = () => {
   const queryClient = useQueryClient();
-  const { data: session } = authClient.useSession();
-  const currentAccountId = session?.user?.id ?? null;
-  const isSignedIn = !!session?.user;
   const { toast } = useToast();
 
   return useMutation<void, Error, ConnectAccountVariables>({
     mutationKey: ["connectAccount"],
     mutationFn: async ({ platform }: ConnectAccountVariables): Promise<void> => {
+      const popup = openAuthPopupWindow();
       try {
         const client = getClient();
         const authDetails = `loginToPlatform:${platform}`;
+        const { data: activeSession } = await authClient.getSession();
 
-        if (!isSignedIn || !currentAccountId) {
-          throw new Error("Wallet not connected or account ID unavailable.");
+        if (!activeSession?.user) {
+          throw new Error("Please sign in first, then connect your wallet.");
+        }
+
+        let nearAccountId =
+          (await resolveLinkedNearAccountId()) ?? getNearWalletDisplayFromSession(activeSession);
+        if (!nearAccountId) {
+          await linkNearWallet();
+          const { data: linkedSession } = await authClient.getSession();
+          nearAccountId =
+            (await resolveLinkedNearAccountId()) ??
+            getNearWalletDisplayFromSession(linkedSession ?? activeSession);
+        }
+        if (!nearAccountId) {
+          throw new Error("Wallet account not available. Please connect your wallet first.");
         }
 
         toast({
@@ -138,7 +253,14 @@ export const useConnectAccount = () => {
           variant: "default",
         });
 
-        const message = `Authenticating request for NEAR account: ${currentAccountId}${authDetails ? ` (${authDetails})` : ""}`;
+        try {
+          popup.blur();
+        } catch {
+          // ignore
+        }
+        window.focus();
+
+        const message = `Authenticating request for NEAR account: ${nearAccountId}${authDetails ? ` (${authDetails})` : ""}`;
         const authToken = await signMessage(message, "crosspost.near");
 
         // Some SDK versions expect object auth payload while older ones accepted a JSON string.
@@ -153,29 +275,40 @@ export const useConnectAccount = () => {
           );
         }
 
-        const response: any = await client.auth.loginToPlatform(platform?.toLowerCase() as any);
-
-        if (
-          response &&
-          response.status &&
-          typeof response.status === "object" &&
-          response.status.code === "AUTH_SUCCESS"
-        ) {
-          return; // Success: platform, userId, status.code format
-        } else if (response && typeof response.success === "boolean") {
-          if (response.success) {
-            return; // Success: ApiResponse format (e.g., URL returned)
-          } else {
-            const errorMessage = response.errors?.length
-              ? response.errors[0].message
-              : "Unknown error occurred during platform login (ApiResponse error).";
-            throw new Error(errorMessage);
-          }
-        } else {
-          console.error("Unexpected response structure from loginToPlatform:", response);
-          throw new Error("Unexpected response from server during platform login.");
+        // Ensure NEAR account is authorized before starting platform OAuth.
+        // Some backends reject /auth/:platform/login until this succeeds.
+        try {
+          await client.auth.authorizeNearAccount();
+        } catch (authorizeError) {
+          console.warn("authorizeNearAccount failed before login:", authorizeError);
         }
+
+        const response = (await client.auth.loginToPlatform(platform?.toLowerCase() as any, {
+          redirect: true,
+        })) as {
+          success?: boolean;
+          data?: { url?: string };
+          errors?: { message?: string }[];
+        };
+
+        if (!response?.success) {
+          const errorMessage = response?.errors?.[0]?.message || "Failed to start platform login.";
+          throw new Error(errorMessage);
+        }
+
+        const authUrl = response?.data?.url;
+        if (!authUrl) {
+          throw new Error("Invalid authentication URL response.");
+        }
+
+        popup.location.href = authUrl;
+        popup.focus();
+
+        await waitForAuthPopupResult(popup);
+        return;
       } catch (error) {
+        const errorMessage = getErrorMessage(error);
+        renderPopupError(popup, errorMessage);
         console.error(`API Mutation Error [connectAccount/${platform}]:`, getErrorMessage(error));
         if (error instanceof Error) {
           throw error; // Re-throw original error if it's already an Error instance

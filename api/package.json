@@ -29,21 +29,21 @@
   "devDependencies": {
     "@effect/language-service": "^0.84.3",
     "@module-federation/node": "catalog:",
-    "@rspack/cli": "^1.6.8",
-    "@rspack/core": "^1.6.8",
+    "@rspack/cli": "^2.0.2",
+    "@rspack/core": "^2.0.2",
     "@types/node": "catalog:",
     "dotenv": "^17.2.3",
     "everything-dev": "workspace:*",
     "every-plugin": "workspace:*",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "catalog:",
-    "zephyr-rspack-plugin": "0.1.4"
+    "zephyr-rspack-plugin": "^1.1.0"
   },
   "scripts": {
     "build": "bun run build:types && rspack build",
     "build:types": "tsc -p tsconfig.contract.json",
     "deploy": "bun run build:types && DEPLOY=true rspack build",
-    "dev": "bun run build:types && rspack serve",
+    "dev": "bun run build:types && node ./node_modules/@rspack/cli/bin/rspack.js serve",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",

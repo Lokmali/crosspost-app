@@ -7,7 +7,8 @@ import type { PostContent } from "@crosspost/plugin/types";
 import { getErrorMessage, isPlatformError } from "@crosspost/sdk";
 import type { Near } from "near-kit";
 import { NETWORK_ID } from "@/config";
-import { getWalletInstance } from "@/lib/near";
+import { authClient } from "@/lib/auth-client";
+import { getWallet, getWalletInstance, resolveLinkedNearAccountId } from "@/lib/near";
 
 export const SOCIAL_CONTRACT = {
   mainnet: "social.near",
@@ -295,25 +296,41 @@ export class NearSocialService {
    */
   async createPost(posts: PostContent[]): Promise<void> {
     const walletInstance = getWalletInstance();
-    if (!walletInstance || !walletInstance.near || !walletInstance.accountId) {
-      throw new Error("Wallet not connected");
+    let near: Near;
+    let accountId: string;
+
+    if (walletInstance?.near && walletInstance.accountId?.trim()) {
+      near = walletInstance.near;
+      accountId = walletInstance.accountId.trim();
+    } else {
+      const nearClient = authClient.near.getNearClient?.() as Near | undefined;
+      if (!nearClient) {
+        throw new Error("Wallet not connected");
+      }
+      near = nearClient;
+      const resolved = await resolveLinkedNearAccountId();
+      if (!resolved) {
+        throw new Error("Wallet not connected");
+      }
+      accountId = resolved;
     }
 
-    const near: Near = walletInstance.near;
-    const accountId = walletInstance.accountId;
-
-    // Get public key from wallet
     let publicKey: string | null = null;
     try {
-      if (walletInstance.connector) {
+      if (walletInstance?.connector) {
         const wallet = await walletInstance.connector.wallet();
+        const accounts = await wallet.getAccounts();
+        if (accounts && accounts.length > 0) {
+          publicKey = accounts[0].publicKey.toString();
+        }
+      } else {
+        const wallet = await getWallet();
         const accounts = await wallet.getAccounts();
         if (accounts && accounts.length > 0) {
           publicKey = accounts[0].publicKey.toString();
         }
       }
     } catch (error) {
-      // Handle "No accounts found" error
       if (error instanceof Error && error.message.includes("No accounts found")) {
         throw new Error("Wallet not connected. Please connect your wallet first.");
       }

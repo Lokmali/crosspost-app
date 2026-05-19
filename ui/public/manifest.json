@@ -1,7 +1,7 @@
 {
-  "name": "Crosspost",
-  "short_name": "Crosspost",
-  "description": "Crosspost - Multi-platform posting",
+  "name": "open crosspost",
+  "short_name": "open crosspost",
+  "description": "open crosspost - Multi-platform posting",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

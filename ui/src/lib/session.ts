@@ -75,3 +75,15 @@ export async function linkNearWallet() {
     });
   });
 }
+
+export async function ensureNearWalletConnectedForSigning() {
+  if (authClient.near.getAccountId?.()) {
+    return;
+  }
+  await linkNearWallet();
+  if (!authClient.near.getAccountId?.()) {
+    throw new Error(
+      "Your NEAR wallet is not connected in this browser. Approve the wallet prompt or use Sign in with NEAR again, then retry.",
+    );
+  }
+}

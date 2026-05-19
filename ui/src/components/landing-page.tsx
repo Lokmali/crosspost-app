@@ -2,14 +2,6 @@ import { ArrowRight, Calendar, Shield, Zap } from "lucide-react";
 import { ConnectToNearButton } from "@/components/connect-to-near";
 import { Button } from "@/components/ui/button";
 
-function XMarkIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-    </svg>
-  );
-}
-
 function MarqueeXIcon() {
   return (
     <svg
@@ -18,7 +10,7 @@ function MarqueeXIcon() {
       viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className="shrink-0 text-blue-600 dark:text-blue-400"
+      className="shrink-0 text-primary"
       aria-hidden
     >
       <path
@@ -30,7 +22,7 @@ function MarqueeXIcon() {
 }
 
 const marqueeChip =
-  "mx-5 inline-flex items-center gap-1.5 text-sm font-bold text-neutral-950 sm:mx-8 sm:gap-2 sm:text-lg dark:text-white";
+  "mx-5 inline-flex items-center gap-1.5 text-sm font-bold text-foreground sm:mx-8 sm:gap-2 sm:text-lg";
 
 function MarqueeSegment({ ariaHidden }: { ariaHidden?: boolean }) {
   return (
@@ -40,15 +32,15 @@ function MarqueeSegment({ ariaHidden }: { ariaHidden?: boolean }) {
         MULTI-PLATFORM POSTING
       </span>
       <span className={marqueeChip}>
-        <Calendar size={20} className="shrink-0 text-purple-600 dark:text-purple-400" aria-hidden />
+        <Calendar size={20} className="shrink-0 text-primary/90" aria-hidden />
         SCHEDULE POSTS
       </span>
       <span className={marqueeChip}>
-        <Zap size={20} className="shrink-0 text-yellow-600 dark:text-yellow-400" aria-hidden />
+        <Zap size={20} className="shrink-0 text-muted-foreground" aria-hidden />
         LIGHTNING FAST
       </span>
       <span className={marqueeChip}>
-        <Shield size={20} className="shrink-0 text-green-600 dark:text-green-400" aria-hidden />
+        <Shield size={20} className="shrink-0 text-primary/70" aria-hidden />
         SECURE & PRIVATE
       </span>
     </div>
@@ -66,7 +58,7 @@ export function LandingPage() {
               Everywhere at Once
         </h1>
 
-          <p className="mx-auto max-w-2xl px-2 text-sm text-gray-600 sm:px-0 sm:text-lg dark:text-gray-400">
+          <p className="mx-auto max-w-2xl px-2 text-sm text-muted-foreground sm:px-0 sm:text-lg">
             Post to Twitter, Farcaster, and more social platforms simultaneously. Save time, reach more people, and
             manage everything from one place.
           </p>
@@ -83,7 +75,7 @@ export function LandingPage() {
       </div>
 
       <div className="px-4 sm:px-6 md:px-10">
-        <div className="border-y-2 border-primary bg-white py-4 overflow-hidden dark:bg-black">
+        <div className="border-y-2 border-primary bg-muted/30 py-4 overflow-hidden">
           <div className="flex w-max items-center animate-marquee whitespace-nowrap">
             <MarqueeSegment />
             <MarqueeSegment ariaHidden />

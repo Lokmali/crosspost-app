@@ -46,6 +46,10 @@ function updateBosConfig(field: "production" | "ssr", url: string) {
 
 const isDevClient = process.env.NODE_ENV !== "production";
 
+const openCrosspostUpstream =
+  process.env.OPEN_CROSSPOST_UPSTREAM_URL?.trim().replace(/\/$/, "") ||
+  "https://api.opencrosspost.com";
+
 function createClientConfig() {
   const plugins = [
     pluginReact(),
@@ -83,6 +87,9 @@ function createClientConfig() {
       },
       define: {
         "import.meta.env.PUBLIC_DEV_HOST_URL": JSON.stringify(process.env.PUBLIC_DEV_HOST_URL ?? ""),
+        "import.meta.env.PUBLIC_OPEN_CROSSPOST_API": JSON.stringify(
+          process.env.PUBLIC_OPEN_CROSSPOST_API ?? "",
+        ),
       },
     },
     resolve: {
@@ -104,8 +111,16 @@ function createClientConfig() {
       printUrls: ({ urls }) => urls.filter((url) => url.includes("localhost")),
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+        "Access-Control-Allow-Headers":
+          "X-Requested-With, Content-Type, Accept, Authorization, X-Near-Account",
+      },
+      proxy: {
+        "/health": { target: openCrosspostUpstream, changeOrigin: true },
+        "/auth": { target: openCrosspostUpstream, changeOrigin: true },
+        "/api/post": { target: openCrosspostUpstream, changeOrigin: true },
+        "/api/activity": { target: openCrosspostUpstream, changeOrigin: true },
+        "/api/rate-limit": { target: openCrosspostUpstream, changeOrigin: true },
       },
     },
     tools: {
@@ -162,6 +177,12 @@ function createServerConfig() {
       entry: {
         index: "./src/router.server.tsx",
       },
+      define: {
+        "import.meta.env.PUBLIC_DEV_HOST_URL": JSON.stringify(process.env.PUBLIC_DEV_HOST_URL ?? ""),
+        "import.meta.env.PUBLIC_OPEN_CROSSPOST_API": JSON.stringify(
+          process.env.PUBLIC_OPEN_CROSSPOST_API ?? "",
+        ),
+      },
     },
     resolve: {
       alias: {
@@ -175,8 +196,9 @@ function createServerConfig() {
       printUrls: ({ urls }) => urls.filter((url) => url.includes("localhost")),
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+        "Access-Control-Allow-Headers":
+          "X-Requested-With, Content-Type, Accept, Authorization, X-Near-Account",
       },
     },
     tools: {

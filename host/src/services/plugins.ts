@@ -40,7 +40,43 @@ function secretsFromEnv(keys: string[]): Record<string, string> {
   return out;
 }
 
-function validatePluginConfig(key: string, config: RuntimePluginInput): void {
+type PluginInitConfig = RuntimeConfig["api"] | RuntimePluginInput;
+
+const PLUGIN_URL_PREFIX = /^(https?:\/\/|local:)/i;
+
+function validatePluginConfig(key: string, config: PluginInitConfig): void {
+  const name = typeof config.name === "string" ? config.name.trim() : "";
+  const url = typeof config.url === "string" ? config.url.trim() : "";
+  const entry = typeof config.entry === "string" ? config.entry.trim() : "";
+  const source = config.source;
+
+  if (!name) {
+    console.warn(`[Plugins] ⚠️  ${key}: invalid plugin config — "name" is missing or empty`);
+  }
+  if (!entry) {
+    console.warn(`[Plugins] ⚠️  ${key}: invalid plugin config — "entry" (remote entry path) is missing or empty`);
+  }
+  if (!source) {
+    console.warn(`[Plugins] ⚠️  ${key}: invalid plugin config — "source" must be "local" or "remote"`);
+  }
+
+  if (!url) {
+    console.warn(`[Plugins] ⚠️  ${key}: no "url" set — plugin will not be registered`);
+    return;
+  }
+
+  if (!PLUGIN_URL_PREFIX.test(url)) {
+    console.warn(
+      `[Plugins] ⚠️  ${key}: url should start with http://, https://, or local: — received: ${url.slice(0, 80)}${url.length > 80 ? "…" : ""}`,
+    );
+  } else if (url.startsWith("http")) {
+    try {
+      new URL(url);
+    } catch {
+      console.warn(`[Plugins] ⚠️  ${key}: url is not a valid absolute URL: ${url}`);
+    }
+  }
+
   if (config.secrets && config.secrets.length > 0) {
     for (const secret of config.secrets) {
       if (!process.env[secret] || process.env[secret] === "") {
